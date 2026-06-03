@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lightning">
+  <title>⚡ Lightning Tracker</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    #header {
+      flex-shrink: 0;
+      background: #1e293b;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #334155;
+      z-index: 1000;
+    }
+    #header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0.02em; }
+    #header h1 span { color: #fbbf24; }
+
+    .mute-btn {
+      background: #334155;
+      border: none;
+      color: #e2e8f0;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .mute-btn:active { opacity: 0.75; }
+    .mute-btn.muted { background: #7f1d1d; color: #fca5a5; }
+
+    /* ── Status bar ── */
+    #statusbar {
+      flex-shrink: 0;
+      background: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 5px 14px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #475569;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .dot.ok   { background: #22c55e; animation: blink 2s infinite; }
+    .dot.warn { background: #f59e0b; }
+    .dot.err  { background: #ef4444; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    /* ── Map wrapper ── */
+    #map-wrap {
+      flex: 1;
+      position: relative;
+      /* Explicit height fallback for Safari */
+      min-height: 0;
+      height: 100%;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── Nearest badge (floats over map) ── */
+    #nearest-badge {
+      position: absolute;
+      top: 12px; right: 12px;
+      z-index: 800;
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 7px 12px;
+      font-size: 12px;
+      color: #e2e8f0;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      pointer-events: none;
+      display: none;
+    }
+    #nearest-badge.show         { display: block; }
+    #nearest-badge.show.danger  { border-color: #ef4444; color: #f87171; }
+    #nearest-badge.show.warn    { border-color: #f59e0b; color: #fbbf24; }
+
+    /* ── Alert panel ── */
+    #alert-panel {
+      flex-shrink: 0;
+      background: #1e293b;
+      border-top: 1px solid #334155;
+      padding: 8px 14px 12px;
+      max-height: 130px;
+      overflow-y: auto;
+    }
+    .panel-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      margin-bottom: 5px;
+    }
+    .alert-row {
+      padding: 4px 0;
+      font-size: 13px;
+      border-bottom: 1px solid #1e293b;
+      line-height: 1.4;
+    }
+    .alert-row:last-child { border-bottom: none; }
+    .alert-row.danger { color: #f87171; }
+    .alert-row.warn   { color: #fbbf24; }
+    .alert-row.info   { color: #64748b; }
+
+    /* ── Screen flash overlay ── */
+    #flash {
+      position: fixed;
+      inset: 0;
+      background: rgba(239, 68, 68, 0.3);
+      pointer-events: none;
+      opacity: 0;
+      z-index: 9999;
+      transition: opacity 0.1s ease;
+    }
+  </style>
+</head>
+<body>
+
+<div id="flash"></div>
+
+<div id="header">
+  <h1><span>⚡</span> Lightning Tracker</h1>
+  <button class="mute-btn" id="mute-btn" onclick="toggleMute()">🔔 Sound On</button>
+</div>
+
+<div id="statusbar">
+  <span><span class="dot" id="ws-dot"></span>Feed</span>
+  <span><span class="dot" id="gps-dot"></span>GPS</span>
+  <span id="nearby-label">0 nearby</span>
+  <span id="total-label" style="color:#475569;">0 global</span>
+</div>
+
+<div id="map-wrap">
+  <div id="map"></div>
+  <div id="nearest-badge"></div>
+</div>
+
+<div id="alert-panel">
+  <div class="panel-label">Recent Alerts</div>
+  <div id="alert-list">
+    <div class="alert-row info">Waiting for GPS and lightning feed…</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+'use strict';
+
+// ── Config ────────────────────────────────────────────────
+const ALERT_MI     = 10;    // outer alert ring
+const DANGER_MI    = 5;     // inner danger ring
+const STRIKE_TTL   = 45000; // ms before a strike dot fades
+const RECONNECT_MS = 4000;
+const NOTIF_COOLDOWN_MS = 30000; // minimum ms between phone notifications
+
+// WebSocket server pool (rotate on reconnect)
+const WS_SERVERS = [
+  'wss://ws7.blitzortung.org:3004/',
+  'wss://ws8.blitzortung.org:3006/',
+  'wss://ws1.blitzortung.org:3004/',
+  'wss://ws2.blitzortung.org:3006/',
+  'wss://ws3.blitzortung.org:3004/',
+];
+
+// ── State ─────────────────────────────────────────────────
+let userLat = null, userLon = null;
+let nearbyCount = 0, globalCount = 0;
+let nearestMi = Infinity;
+let muted = false;
+let ws = null, wsIdx = 0;
+let userMarker = null, ringAlert = null, ringDanger = null;
+let audioCtx = null;
+let audioUnlocked = false;
+let lastNotifTime = 0;
+
+// ── Map ───────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true, attributionControl: true })
+              .setView([39, -98], 4);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© <a href="https://openstreetmap.org">OSM</a> © <a href="https://carto.com">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 18
+}).addTo(map);
+
+// Force correct size after layout settles
+setTimeout(() => map.invalidateSize(), 200);
+
+// ── Haversine distance in miles ────────────────────────────
+function distMi(lat1, lon1, lat2, lon2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── Audio ─────────────────────────────────────────────────
+function unlockAudio() {
+  if (audioUnlocked) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioCtx.resume();
+    audioUnlocked = true;
+  } catch (_) {}
+}
+
+function playTone(freqs, danger) {
+  if (muted || !audioUnlocked || !audioCtx) return;
+  try {
+    audioCtx.resume(); // re-resume if suspended by browser
+    let t = audioCtx.currentTime;
+    freqs.forEach(freq => {
+      const osc  = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = danger ? 'sawtooth' : 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(danger ? 0.4 : 0.28, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38);
+      osc.start(t);
+      osc.stop(t + 0.42);
+      t += 0.4;
+    });
+  } catch (_) {}
+}
+
+// ── UI helpers ────────────────────────────────────────────
+function setDot(id, state) {
+  const el = document.getElementById(id);
+  el.className = 'dot' + (state ? ' ' + state : '');
+}
+
+function flashScreen() {
+  const el = document.getElementById('flash');
+  el.style.opacity = '1';
+  setTimeout(() => { el.style.opacity = '0'; }, 220);
+}
+
+function addAlert(text, level) {
+  const list = document.getElementById('alert-list');
+  // Clear placeholder on first real alert
+  if (list.children.length === 1 && list.firstElementChild.classList.contains('info')) {
+    list.innerHTML = '';
+  }
+  const now = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const row = document.createElement('div');
+  row.className = 'alert-row ' + level;
+  row.textContent = now + ' — ' + text;
+  list.insertBefore(row, list.firstChild);
+  // Keep list to 10 rows max
+  while (list.children.length > 10) list.removeChild(list.lastChild);
+}
+
+function updateNearest(dist) {
+  // Only update badge if this is closer than current nearest
+  if (dist > nearestMi) return;
+  nearestMi = dist;
+  const badge = document.getElementById('nearest-badge');
+  badge.textContent = '⚡ Nearest: ' + dist.toFixed(1) + ' mi';
+  const cls = dist <= DANGER_MI ? 'danger' : dist <= ALERT_MI ? 'warn' : '';
+  badge.className = 'show' + (cls ? ' ' + cls : '');
+}
+
+function resetNearest() {
+  // Reset when user moves significantly
+  nearestMi = Infinity;
+  const badge = document.getElementById('nearest-badge');
+  badge.className = '';
+}
+
+// ── GPS ───────────────────────────────────────────────────
+let lastGpsLat = null, lastGpsLon = null;
+
+function startGPS() {
+  if (!navigator.geolocation) {
+    setDot('gps-dot', 'err');
+    addAlert('GPS unavailable — showing Fargo, ND', 'info');
+    placeUser(46.877, -96.789);
+    return;
+  }
+
+  navigator.geolocation.watchPosition(
+    pos => {
+      setDot('gps-dot', 'ok');
+      const { latitude: lat, longitude: lon } = pos.coords;
+
+      // Reset nearest if user moved > 0.5 miles
+      if (lastGpsLat !== null && distMi(lastGpsLat, lastGpsLon, lat, lon) > 0.5) {
+        resetNearest();
+      }
+      lastGpsLat = lat; lastGpsLon = lon;
+      placeUser(lat, lon);
+    },
+    err => {
+      setDot('gps-dot', 'warn');
+      if (userLat === null) {
+        addAlert('GPS denied — showing Fargo, ND', 'info');
+        placeUser(46.877, -96.789);
+      }
+    },
+    { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+  );
+}
+
+function placeUser(lat, lon) {
+  userLat = lat; userLon = lon;
+
+  if (userMarker) map.removeLayer(userMarker);
+  if (ringAlert)  map.removeLayer(ringAlert);
+  if (ringDanger) map.removeLayer(ringDanger);
+
+  // User dot (blue)
+  userMarker = L.circleMarker([lat, lon], {
+    radius: 9, color: '#3b82f6', fillColor: '#3b82f6',
+    fillOpacity: 0.85, weight: 2.5
+  }).bindPopup('📍 You').addTo(map);
+
+  // 10-mile amber dashed ring
+  ringAlert = L.circle([lat, lon], {
+    radius: ALERT_MI * 1609.34,
+    color: '#f59e0b', weight: 1.5,
+    fill: false, dashArray: '6 5', opacity: 0.5
+  }).addTo(map);
+
+  // 5-mile red dashed ring
+  ringDanger = L.circle([lat, lon], {
+    radius: DANGER_MI * 1609.34,
+    color: '#ef4444', weight: 1,
+    fill: false, dashArray: '4 4', opacity: 0.35
+  }).addTo(map);
+
+  map.setView([lat, lon], 10);
+}
+
+// ── Lightning WebSocket ────────────────────────────────────
+function connectFeed() {
+  const url = WS_SERVERS[wsIdx % WS_SERVERS.length];
+  wsIdx++;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    setDot('ws-dot', 'ok');
+    ws.send(JSON.stringify({ a: 111 })); // subscribe to North America feed
+  };
+
+  ws.onmessage = evt => {
+    try {
+      const d = JSON.parse(evt.data);
+      if (typeof d.lat === 'number' && typeof d.lon === 'number') {
+        onStrike(d.lat, d.lon);
+      }
+    } catch (_) {}
+  };
+
+  ws.onclose = () => {
+    setDot('ws-dot', 'err');
+    setTimeout(connectFeed, RECONNECT_MS);
+  };
+
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
+}
+
+function onStrike(lat, lon) {
+  globalCount++;
+  document.getElementById('total-label').textContent = globalCount.toLocaleString() + ' global';
+
+  // Render yellow dot on map, remove after TTL
+  const dot = L.circleMarker([lat, lon], {
+    radius: 3.5, color: '#fbbf24', fillColor: '#fbbf24',
+    fillOpacity: 0.9, weight: 0.5
+  }).addTo(map);
+  setTimeout(() => { try { map.removeLayer(dot); } catch (_) {} }, STRIKE_TTL);
+
+  if (userLat === null) return;
+
+  const dist = distMi(userLat, userLon, lat, lon);
+  updateNearest(dist);
+
+  if (dist > ALERT_MI) return;
+
+  // It's within the alert zone
+  nearbyCount++;
+  document.getElementById('nearby-label').textContent = nearbyCount + ' nearby';
+
+  const danger = dist <= DANGER_MI;
+
+  // Sound (only if audio has been unlocked by user tap)
+  if (danger) {
+    playTone([880, 660, 880, 1100], true);
+    flashScreen();
+  } else {
+    playTone([440, 550], false);
+  }
+
+  // Alert panel row (always shown)
+  const rowText = danger
+    ? `🔴 CLOSE — strike ${dist.toFixed(1)} mi away`
+    : `🟡 Strike ${dist.toFixed(1)} mi away`;
+  addAlert(rowText, danger ? 'danger' : 'warn');
+
+  // Push notification (throttled to avoid spam)
+  const now = Date.now();
+  if (Notification.permission === 'granted' && (now - lastNotifTime) >= NOTIF_COOLDOWN_MS) {
+    lastNotifTime = now;
+    try {
+      new Notification(danger ? '⚡ LIGHTNING VERY CLOSE!' : '⚡ Lightning Alert', {
+        body: `Strike ${dist.toFixed(1)} miles from your location`,
+        tag: 'lightning',
+        renotify: true,
+        silent: false
+      });
+    } catch (_) {}
+  }
+}
+
+// ── Mute toggle ───────────────────────────────────────────
+function toggleMute() {
+  unlockAudio(); // Unlock on first tap of any button
+  muted = !muted;
+  const btn = document.getElementById('mute-btn');
+  btn.textContent = muted ? '🔕 Muted' : '🔔 Sound On';
+  btn.className   = 'mute-btn' + (muted ? ' muted' : '');
+}
+
+// ── Init ──────────────────────────────────────────────────
+// Unlock audio on first touch anywhere (iOS requirement)
+document.addEventListener('touchstart', unlockAudio, { once: true });
+document.addEventListener('click',      unlockAudio, { once: true });
+
+// Request notification permission
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+
+startGPS();
+connectFeed();
+</script>
+</body>
+</html>
